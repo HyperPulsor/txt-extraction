@@ -1,7 +1,9 @@
+import dask.dataframe as dd
 import pandas as pd
 import os
 import time
 
+# 0.0001665 second for 1 row
 input_folder = 'input'
 output_folder = 'output'
 
@@ -35,6 +37,8 @@ form_types = {
     3: "Domestik"
 }
 
+max_rows_per_sheet = 1_048_576
+
 for file_name in os.listdir(input_folder):
     if file_name.endswith('.txt'):
         start_time = time.time()
@@ -67,33 +71,38 @@ for file_name in os.listdir(input_folder):
             extract_cols.insert(record_no_index, "KOTA_ASAL")
             extract_cols.insert(record_no_index + 1, "NEGARA_TUJUAN")
         elif ans == 2:
-            extract_cols.insert(record_no_index, "NEGARA_ASAL")
-            extract_cols.insert(record_no_index + 1, "KOTA_TUJUAN")
             if "TUJUAN_TRX" in extract_cols:
                 extract_cols.remove("TUJUAN_TRX")
             if "FREKUENSI_PENGIRIMAN" in extract_cols:
                 frekuensi_index = extract_cols.index("FREKUENSI_PENGIRIMAN")
                 extract_cols[frekuensi_index] = "FREKUENSI"
+            extract_cols.insert(record_no_index, "NEGARA_ASAL")
+            extract_cols.insert(record_no_index + 1, "KOTA_TUJUAN")
         else:
             extract_cols.insert(record_no_index, "KOTA_ASAL")
             extract_cols.insert(record_no_index + 1, "KOTA_TUJUAN")
 
         try:
-            data = pd.read_csv(input_path, delimiter="|", names=extract_cols, skipinitialspace=True, dtype=column_types,
-                           header=0, engine="python", encoding="latin-1")
-            data["CREATED_DATE"] = pd.to_datetime(data["CREATED_DATE"], format="%d-%m-%Y %H:%M:%S")
+            # Ngebaca dulu filenya txt
+            chunk_size = 1000000
+            data = dd.read_csv(input_path, delimiter="|", names=extract_cols, dtype=column_types,
+                               header=0, engine="pyarrow", encoding="latin-1", blocksize="512MB")
+
+            data["CREATED_DATE"] = dd.to_datetime(data["CREATED_DATE"], format="%d-%m-%Y %H:%M:%S")
             data["CREATED_DATE"] = data["CREATED_DATE"].dt.strftime("%d/%m/%Y %H:%M:%S")
 
-            max_rows_per_sheet = 1_048_570
-            num_sheets = len(data) // max_rows_per_sheet + 1
+            with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
+                sheet_index = 1
+                for i, partition in enumerate(data.to_delayed()):
+                    partition_df = partition.compute()
 
-            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                for i in range(num_sheets):
-                    start_row = i * max_rows_per_sheet
-                    end_row = start_row + max_rows_per_sheet
-                    sheet_data = data[start_row:end_row]
-                    sheet_name = f'Sheet_{i + 1}'
-                    sheet_data.to_excel(writer, sheet_name=sheet_name, index=False)
+                    for start_row in range(0, len(partition_df), max_rows_per_sheet):
+                        end_row = start_row + max_rows_per_sheet
+                        sheet_df = partition_df.iloc[start_row:end_row]
+                        sheet_name = f'Sheet_{sheet_index}'
+                        sheet_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                        sheet_index += 1
+                    del partition_df
 
             print(f"Data from {file_name} has been saved to {output_file_name}")
         except ValueError as ve:
