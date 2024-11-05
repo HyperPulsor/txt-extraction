@@ -32,8 +32,8 @@ base_extract_cols = ["FORM_NO", "SANDI_PELAPOR", "FORM_PERIOD", "RECORD_NO", "NA
                      "FREKUENSI_PENGIRIMAN", "NOMINAL_TRX", "TUJUAN_TRX", "CREATED_DATE"]
 
 form_types = {
-    1: "Incoming",
-    2: "Outgoing",
+    1: "Outgoing",
+    2: "Incoming",
     3: "Domestik"
 }
 
